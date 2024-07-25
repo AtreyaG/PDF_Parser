@@ -1,0 +1,5 @@
+__pycache__
+venv/
+pdf_docs/
+doc_storage/
+vector_storage/
