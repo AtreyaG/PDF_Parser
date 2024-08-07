@@ -1,77 +1,100 @@
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_core.prompts import ChatPromptTemplate   
-from langchain_community.llms.ollama import Ollama
-from langchain_core.callbacks import CallbackManager, StreamingStdOutCallbackHandler
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder  
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains.history_aware_retriever import create_history_aware_retriever
 from langchain.retrievers import ContextualCompressionRetriever
-from langchain.retrievers.document_compressors import LLMChainFilter, EmbeddingsFilter
+from langchain.retrievers.document_compressors import EmbeddingsFilter, LLMChainFilter
 from langchain.retrievers.multi_query import MultiQueryRetriever
-import logging
-
-from utils import get_retriever
-import re
+from langchain_core.messages import HumanMessage, AIMessage
 
 
+from utils import get_retriever, get_embedding_model, get_chat_model, get_llm_model
+from templates import QUERY_PROMPT, SYSTEM_PROMPT, CONTEXTUALIZE_PROMPT
 
 
-embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
-
-
-
-PROMPT_TEMPLATE = (
-
-    "You are an assistant for question-answering tasks. "
-    "Use the following pieces of retrieved context to answer "
-    "the question. If you don't know the answer, say that you "
-    "don't know. Use complete sentences to answer the question"
-    "\n\n"
-    "{context}"
-)
-
-
-
-
-
-prompt = ChatPromptTemplate.from_messages(
+chat_history_prompt = ChatPromptTemplate.from_messages(
     [
-        ("system", PROMPT_TEMPLATE),
+        ("system", CONTEXTUALIZE_PROMPT),
+        MessagesPlaceholder("chat_history"),
         ("human", "{input}"),
+
     ]
 )
 
 
-def main():
+prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ]
+)
 
-    logging.basicConfig
-    logging.getLogger("langchain.retrievers.multi_query").setLevel(logging.INFO)
+chat_llm = get_chat_model()
+llm = get_llm_model()
 
 
-    model = Ollama(model='llama3', callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
-
+def create_multi_query_retreiver():
 
     parent_child_retriever = get_retriever()
 
     multi_query_retriever = MultiQueryRetriever.from_llm(
         retriever=parent_child_retriever,
-        llm=model
+        llm=chat_llm,
+        prompt=QUERY_PROMPT
     )
 
-    
+    return multi_query_retriever
 
-    embeddings_filter = EmbeddingsFilter(embeddings=embedding_model, similarity_threshold = .7)
+
+def create_compressor():
+
+    _filter = LLMChainFilter.from_llm(llm)
+
+    multi_query_retriever = create_multi_query_retreiver()
 
     compression_retriever = ContextualCompressionRetriever(
-        base_compressor=embeddings_filter, base_retriever=multi_query_retriever
+    base_compressor=_filter, base_retriever=multi_query_retriever
     )
 
+    return compression_retriever
 
 
 
+def main():
 
-    question_answer_chain = create_stuff_documents_chain(model, prompt)
-    rag_chain = create_retrieval_chain(compression_retriever, question_answer_chain)
-    results = rag_chain.invoke(({"input": "What is the role of the Cultural Chair in the Chinese Student Association (CSA) at UT-Dallas?"}))
+
+    compression_retriever = create_compressor()
+
+   
+    retriever_chain = create_history_aware_retriever(llm, compression_retriever, chat_history_prompt)
+    question_answer_chain = create_stuff_documents_chain(chat_llm, prompt)
+    rag_chain = create_retrieval_chain(retriever_chain, question_answer_chain)
+
+
+
+    chat_history = []
+
+
+
+    while True:
+        query = input("You: ")
+        if query.lower() == "exit":
+            break
+
+        chat_history.append(HumanMessage(content=query))
+
+        results = rag_chain.invoke(({
+            "chat_history": chat_history,
+            "input": query 
+        }))
+
+        print("\n")
+
+        chat_history.append(AIMessage(content=results['answer']))
+
+
+
 
 
 
