@@ -39,7 +39,7 @@ def get_embedding_model():
 def get_retriever():
     fs = LocalFileStore(DOC_STORE_PATH)
     store = create_kv_docstore(fs)
-    parent_splitter = RecursiveCharacterTextSplitter(chunk_size = 1000)
+    parent_splitter = RecursiveCharacterTextSplitter(chunk_size = 1500)
     child_splitter = RecursiveCharacterTextSplitter(chunk_size = 256)
 
     vectorstore = Chroma(collection_name="split_parents", embedding_function=get_embedding_model(), persist_directory= VECTOR_DB_PATH)
